@@ -1,0 +1,133 @@
+{
+  "version": "v1.0",
+  "hostname": "test",
+  "services": [
+    {
+      "service": "urn:x-nmos:service:connectionmanagement",
+      "api": "v1.0",
+      "protocol": "http",
+      "endpoint": {
+        "host": "localhost",
+        "port": 8080,
+        "href": "/x-nmos/connection/v1.0/"
+      },
+      "priority": 1,
+      "transport": "tcp",
+      "authentication": "none",
+      "version": "v1.0"
+    },
+    {
+      "service": "urn:x-nmos:service:connectionmanagement",
+      "api": "v1.1",
+      "protocol": "http",
+      "endpoint": {
+        "host": "localhost",
+        "port": 8080,
+        "href": "/x-nmos/connection/v1.1/"
+      },
+      "priority": 1,
+      "transport": "tcp",
+      "authentication": "none",
+      "version": "v1.1"
+    },
+    {
+      "service": "urn:x-nmos:service:registration",
+      "api": "v1.0",
+      "protocol": "http",
+      "endpoint": {
+        "host": "localhost",
+        "port": 8080,
+        "href": "/x-nmos/registration/v1.0/"
+      },
+      "priority": 1,
+      "transport": "tcp",
+      "authentication": "none",
+      "version": "v1.0"
+    },
+    {
+      "service": "urn:x-nmos:service:registration",
+      "api": "v1.1",
+      "protocol": "http",
+      "endpoint": {
+        "host": "localhost",
+        "port": 8080,
+        "href": "/x-nmos/registration/v1.1/"
+      },
+      "priority": 1,
+      "transport": "tcp",
+      "authentication": "none",
+      "version": "v1.1"
+    },
+    {
+      "service": "urn:x-nmos:service:query",
+      "api": "v1.0",
+      "protocol": "http",
+      "endpoint": {
+        "host": "localhost",
+        "port": 8080,
+        "href": "/x-nmos/query/v1.0/"
+      },
+      "priority": 1,
+      "transport": "tcp",
+      "authentication": "none",
+      "version": "v1.0"
+    },
+    {
+      "service": "urn:x-nmos:service:query",
+      "api": "v1.1",
+      "protocol": "http",
+      "endpoint": {
+        "host": "localhost",
+        "port": 8080,
+        "href": "/x-nmos/query/v1.1/"
+      },
+      "priority": 1,
+      "transport": "tcp",
+      "authentication": "none",
+      "version": "v1.1"
+    },
+    {
+      "service": "urn:x-nmos:service:control",
+      "api": "v1.0",
+      "protocol": "http",
+      "endpoint": {
+        "host": "localhost",
+        "port": 8080,
+        "href": "/x-nmos/control/v1.0/"
+      },
+      "priority": 1,
+      "transport": "tcp",
+      "authentication": "none",
+      "version": "v1.0"
+    },
+    {
+      "service": "urn:x-nmos:service:control",
+      "api": "v1.1",
+      "protocol": "http",
+      "endpoint": {
+        "host": "localhost",
+        "port": 8080,
+        "href": "/x-nmos/control/v1.1/"
+      },
+      "priority": 1,
+      "transport": "tcp",
+      "authentication": "none",
+      "version": "v1.1"
+    }
+  ],
+  "interfaces": [
+    {
+      "if_name": "eth0",
+      "port": 8080,
+      "caps": [
+        "urn:x-nmos:cap:control",
+        "urn:x-nmos:cap:query",
+        "urn:x-nmos:cap:registration",
+        "urn:x-nmos:cap:connection"
+      ]
+    }
+  ],
+  "tags": {
+    "foo": "bar"
+  }
+}
