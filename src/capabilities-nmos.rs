@@ -1,7 +1,6 @@
-use serde_json::{json, Value};
 use regex::Regex;
 use serde::de::DeserializeOwned;
-
+use serde_json::{json, Value};
 
 use crate::json_fields::{self, JsonField};
 
@@ -34,7 +33,11 @@ fn make_caps_boolean_constraint(enum_values: &[bool]) -> Value {
     })
 }
 
-fn make_caps_rational_constraint(enum_values: &[crate::rational::Rational], minimum: crate::rational::Rational, maximum: crate::rational::Rational) -> Value {
+fn make_caps_rational_constraint(
+    enum_values: &[crate::rational::Rational],
+    minimum: crate::rational::Rational,
+    maximum: crate::rational::Rational,
+) -> Value {
     json!({
         json_fields::CONSTRAINT_ENUM.key: enum_values.iter().map(|r| crate::rational::make_rational(r)).collect::<Vec<Value>>(),
         json_fields::CONSTRAINT_MINIMUM.key: crate::rational::make_rational(minimum),
@@ -53,7 +56,10 @@ mod details {
     {
         if let Some(enum_values) = constraint.get(json_fields::CONSTRAINT_ENUM.key) {
             if let Some(enum_values) = enum_values.as_array() {
-                if !enum_values.iter().any(|enum_value| parse(enum_value) == Some(value)) {
+                if !enum_values
+                    .iter()
+                    .any(|enum_value| parse(enum_value) == Some(value))
+                {
                     return false;
                 }
             }
@@ -62,12 +68,12 @@ mod details {
     }
 }
 
-
-
 fn match_enum_constraint<T: DeserializeOwned>(value: T, constraint: &Value) -> bool {
     if constraint.has_key("enum") {
         let values = constraint["enum"].as_array().unwrap();
-        return values.iter().any(|v| v == &serde_json::to_value(&value).unwrap());
+        return values
+            .iter()
+            .any(|v| v == &serde_json::to_value(&value).unwrap());
     }
     true
 }
@@ -119,8 +125,7 @@ pub fn match_boolean_constraint(value: bool, constraint: &Value) -> bool {
 }
 
 pub fn match_rational_constraint(value: &nmos::rational::Rational, constraint: &Value) -> bool {
-    match_enum_constraint(value, constraint)
-        && match_minimum_maximum_constraint(value, constraint)
+    match_enum_constraint(value, constraint) && match_minimum_maximum_constraint(value, constraint)
 }
 
 pub fn match_constraint(value: &Value, constraint: &Value) -> bool {
@@ -138,3 +143,4 @@ pub fn match_constraint(value: &Value, constraint: &Value) -> bool {
         }
     }
 }
+

@@ -1,6 +1,8 @@
 // an implementation of IS-04 for NMOS in rust
 //
 
+pub mod capabilities-nmos;
+
 use hyper::rt::{Future, Stream};
 use hyper::Client;
 use std::fs::File;
