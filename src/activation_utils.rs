@@ -30,6 +30,7 @@ pub fn get_activation_state(activation: &Value) -> Result<ActivationState> {
     let mode_or_null = nmos::fields::mode(activation)?;
     if mode_or_null.is_null() {
         return Ok(ActivationState::ActivationNotPending);
+
     }
 
     let mode = ActivationMode::from_str(mode_or_null.as_str().unwrap())?;
@@ -133,8 +134,6 @@ fn new(model: &'a nmos::node_model, id_type: (nmos::id, nmos::type)) -> Self {
 Self { model, id_type }
 }
 
-rust
-Copy code
 fn operator(&self) -> bool {
     if self.model.shutdown {
         return true;
@@ -216,3 +215,63 @@ fn handle_immediate_activation_pending(model: &mut nmos::node_model, lock: &mut 
     }
 }
 }
+fn downgrade(resource: &nmos::Resource, version: &nmos::ApiVersion) -> web::json::JsonValue {
+    downgrade_with(resource, version, version)
+}
+
+fn downgrade_with(resource: &nmos::Resource, version: &nmos::ApiVersion, downgrade_version: &nmos::ApiVersion) -> web::json::JsonValue {
+    downgrade(resource.version, resource.downgrade_version, resource.type, resource.data.clone(), version, downgrade_version);
+}
+
+use std::collections::HashMap;
+
+static RESOURCES_VERSIONS: &'static HashMap<nmos::type, HashMap<nmos::api_version, Vec<utility::string_t>>> = &{
+    let mut map = HashMap::new();
+    map.insert(nmos::types::node, {
+        let mut node_versions = HashMap::new();
+        node_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("href"), U("hostname"), U("caps"), U("services")]);
+        node_versions.insert(nmos::is04_versions::v1_1, vec![U("description"), U("tags"), U("api"), U("clocks")]);
+        node_versions.insert(nmos::is04_versions::v1_2, vec![U("interfaces")]);
+        node_versions
+    });
+    map.insert(nmos::types::device, {
+        let mut device_versions = HashMap::new();
+        device_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("type"), U("node_id"), U("senders"), U("receivers")]);
+        device_versions.insert(nmos::is04_versions::v1_1, vec![U("description"), U("tags"), U("controls")]);
+        device_versions
+    });
+    map.insert(nmos::types::source, {
+        let mut source_versions = HashMap::new();
+        source_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("description"), U("format"), U("caps"), U("tags"), U("device_id"), U("parents")]);
+        source_versions.insert(nmos::is04_versions::v1_1, vec![U("grain_rate"), U("clock_name"), U("channels")]);
+        source_versions.insert(nmos::is04_versions::v1_3, vec![U("event_type")]);
+        source_versions
+    });
+    map.insert(nmos::types::flow, {
+        let mut flow_versions = HashMap::new();
+        flow_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("description"), U("format"), U("tags"), U("source_id"), U("parents")]);
+        flow_versions.insert(nmos::is04_versions::v1_1, vec![U("grain_rate"), U("device_id"), U("media_type"), U("sample_rate"), U("bit_depth"), U("DID_SDID"), U("frame_width"), U("frame_height"), U("interlace_mode"), U("colorspace"), U("transfer_characteristic"), U("components")]);
+        flow_versions.insert(nmos::is04_versions::v1_3, vec![U("event_type")]);
+        flow_versions
+    });
+    map.insert(nmos::types::sender, {
+        let mut sender_versions = HashMap::new();
+        sender_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("description"), U("flow_id"), U("transport"), U("tags"), U("device_id"), U("manifest_href")]);
+        sender_versions.insert(nmos::is04_versions::v1_2, vec![U("caps"), U("interface_bindings"), U("subscription")]);
+        sender_versions
+    });
+    map.insert(nmos::types::receiver, {
+        let mut receiver_versions = HashMap::new();
+        receiver_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("description"), U("format"), U("caps"), U("tags"), U("device_id"), U("transport"), U("subscription"))];
+        receiver_versions.insert(nmos::is04_versions::v1_2, vec![U("interface_bindings")]);
+        receiver_versions
+    });
+    map.insert(nmps::types::subscription, {
+        let mut subscription_versions = HashMap::new();
+        subscription_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("ws_href"), U("max_updates_rate_ms"), U("persist"), U("resource_path"), U("params")]);
+        subscription_versions.insert(nmos::is04_versions::v1_1, vec![U("secure")]);
+        subscription_versions.insert(nmos::is04_versions::v1_3, vec![U("authorization")]);
+        subscription_versions
+    });
+    resources_versions;
+};
