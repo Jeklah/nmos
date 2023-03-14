@@ -97,54 +97,190 @@ mod details {
             make_api_version(downgrade_version) + " downgrade request"
         } + " is not permitted for a " + &make_api_version(resource_version) + " resource"
     }
+
+    use std::collections::HashMap;
+
+fn downgrade(resource: &nmos::resource, version: &nmos::api_version) -> web::json::Value {
+    downgrade(resource, version, version)
 }
 
-fn downgrade(resource: &nmos::Resource, version: &nmos::ApiVersion) -> web::json::JsonValue {
-    downgrade_with(resource, version, version)
+fn downgrade(
+    resource: &nmos::resource,
+    version: &nmos::api_version,
+    downgrade_version: &nmos::api_version,
+) -> web::json::Value {
+    downgrade(
+        resource.version,
+        resource.downgrade_version,
+        resource.type_,
+        resource.data.clone(),
+        version,
+        downgrade_version,
+    )
 }
 
-fn downgrade_with(resource: &nmos::Resource, version: &nmos::ApiVersion, downgrade_version: &nmos::ApiVersion) -> web::json::JsonValue {
-    downgrade(resource.version, resource.downgrade_version, resource.type, resource.data.clone(), version, downgrade_version)
+fn resources_versions() -> &'static HashMap<
+    nmos::type_,
+    HashMap<nmos::api_version, Vec<utility::string::String>>,
+> {
+    static RESOURCES_VERSIONS: HashMap<
+        nmos::type_,
+        HashMap<nmos::api_version, Vec<utility::string::String>>,
+    > = {
+        let mut map = HashMap::new();
+        map.insert(
+            nmos::types::node,
+            vec![
+                (nmos::is04_versions::v1_0, vec![
+                    "id", "version", "label", "href", "hostname", "caps", "services",
+                ]),
+                (nmos::is04_versions::v1_1, vec![
+                    "description", "tags", "api", "clocks",
+                ]),
+                (nmos::is04_versions::v1_2, vec![
+                    "interfaces",
+                ]),
+            ].into_iter()
+            .collect(),
+        );
+        map.insert(
+            nmos::types::device,
+            vec![
+                (nmos::is04_versions::v1_0, vec![
+                    "id", "version", "label", "type", "node_id", "senders", "receivers",
+                ]),
+                (nmos::is04_versions::v1_1, vec![
+                    "description", "tags", "controls",
+                ]),
+            ].into_iter()
+            .collect(),
+        );
+        map.insert(
+            nmos::types::source,
+            vec![
+                (nmos::is04_versions::v1_0, vec![
+                    "id", "version", "label", "description", "format", "caps", "tags", "device_id", "parents",
+                ]),
+                (nmos::is04_versions::v1_1, vec![
+                    "grain_rate", "clock_name", "channels",
+                ]),
+                (nmos::is04_versions::v1_3, vec![
+                    "event_type",
+                ]),
+            ].into_iter()
+            .collect(),
+        );
+        map.insert(
+            nmos::types::flow,
+            vec![
+                (nmos::is04_versions::v1_0, vec![
+                    "id", "version", "label", "description", "format", "tags", "source_id", "parents",
+                ]),
+                (nmos::is04_versions::v1_1, vec![
+                    "grain_rate", "device_id", "media_type", "sample_rate", "bit_depth", "DID_SDID",
+                    "frame_width", "frame_height", "interlace_mode", "colorspace", "transfer_characteristic",
+                    "components",
+                ]),
+                (nmos::is04_versions::v1_3, vec![
+                    "event_type",
+                ]),
+            ].into_iter()
+            .collect(),
+        );
+        map.insert(
+            nmos::types::sender,
+            vec![
+                (nmos::is04_versions::v1_0, vec![
+                    "id", "version", "label", "description", "tags", "device_id", "flow_id", "transport", "manifest_href",
+                ]),
+                (nmos::is04_versions::v1_1, vec![
+                    "interface_bindings", "subscription", "master_enable",
+                ]),
+                (nmos::is04_versions::v1_2, vec![
+                    "grain_rate", "master_enable", "activation", "subscription", "interface_bindings",
+                ]),
+                (nmos::is04_versions::v1_3, vec![
+                    "event_type",
+                ]),
+            ].into_iter()
+            .collect(),
+        );
+        map.insert(
+            nmos::types::receiver,
+            vec![
+                (nmos::is04_versions::v1_0, vec![
+                    "id", "version", "label", "description", "tags", "device_id", "flow_id", "transport", "subscription",
+                ]),
+                (nmos::is04_versions::v1_1, vec![
+                    "interface_bindings", "subscription", "master_enable",
+                ]),
+                (nmos::is04_versions::v1_2, vec![
+                    "grain_rate", "master_enable", "activation", "subscription", "interface_bindings",
+                ]),
+                (nmos::is04_versions::v1_3, vec![
+                    "event_type",
+                ]),
+            ].into_iter()
+            .collect(),
+        );
+        map.insert(
+            nmos::types::subscription,
+            vec![
+                (nmos::is04_versions::v1_0, vec![
+                    "id", "version", "label", "description", "tags", "resource_path", "params",
+                ]),
+                (nmos::is04_versions::v1_1, vec![
+                    "persist", "receiver_id", "sender_id", "active",
+                ]),
+                (nmos::is04_versions::v1_2, vec![
+                    "persist", "receiver_id", "sender_id", "active", "receiver_active", "sender_active",
+                ]),
+            ].into_iter()
+            .collect(),
+        );
+
+fn downgrade(
+    resource_version: nmos::ApiVersion,
+    resource_downgrade_version: nmos::ApiVersion,
+    resource_type: nmos::Type,
+    resource_data: web::json::Value,
+    version: nmos::ApiVersion,
+    downgrade_version: nmos::ApiVersion,
+) -> web::json::Value {
+    if !is_permitted_downgrade(
+        resource_version,
+        resource_downgrade_version,
+        resource_type,
+        version,
+        downgrade_version,
+    ) {
+        return web::json::Value::Null;
+    }
+
+    // optimisation for no resource data (special case)
+    if resource_data.is_null() {
+        return resource_data;
+    }
+
+    // optimisation for the common case (old-versioned resources, if being permitted, do not get upgraded)
+    if resource_version <= version {
+        return resource_data;
+    }
+
+    let mut result = web::json::Value::Object(Default::default());
+
+    let resource_versions = resources_versions().get(&resource_type).unwrap();
+    let version_first = resource_versions.iter();
+    let version_last = resource_versions.upper_bound(&version);
+    let mut result = json::object::Object::new();
+    for version_properties in version_first {
+        if version_properties.0 > &version {
+            break;
+        }
+    for property in &version_properties.1 {
+        if resource_data.has_key(property) {
+            result.insert(property.clone(), resource_data[property].clone());
+        }
+    }
 }
-
-
-use std::collections::HashMap;
-
-static RESOURCES_VERSIONS: &'static HashMap<nmos::type, HashMap<nmos::api_version, Vec<utility::string_t>>> = &{
-    let mut map = HashMap::new();
-    map.insert(nmos::types::node, {
-        let mut node_versions = HashMap::new();
-        node_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("href"), U("hostname"), U("caps"), U("services")]);
-        node_versions.insert(nmos::is04_versions::v1_1, vec![U("description"), U("tags"), U("api"), U("clocks")]);
-        node_versions.insert(nmos::is04_versions::v1_2, vec![U("interfaces")]);
-        node_versions
-    });
-    map.insert(nmos::types::device, {
-        let mut device_versions = HashMap::new();
-        device_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("type"), U("node_id"), U("senders"), U("receivers")]);
-        device_versions.insert(nmos::is04_versions::v1_1, vec![U("description"), U("tags"), U("controls")]);
-        device_versions
-    });
-    map.insert(nmos::types::source, {
-        let mut source_versions = HashMap::new();
-        source_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("description"), U("format"), U("caps"), U("tags"), U("device_id"), U("parents")]);
-        source_versions.insert(nmos::is04_versions::v1_1, vec![U("grain_rate"), U("clock_name"), U("channels")]);
-        source_versions.insert(nmos::is04_versions::v1_3, vec![U("event_type")]);
-        source_versions
-    });
-    map.insert(nmos::types::flow, {
-        let mut flow_versions = HashMap::new();
-        flow_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("description"), U("format"), U("tags"), U("source_id"), U("parents")]);
-        flow_versions.insert(nmos::is04_versions::v1_1, vec![U("grain_rate"), U("device_id"), U("media_type"), U("sample_rate"), U("bit_depth"), U("DID_SDID"), U("frame_width"), U("frame_height"), U("interlace_mode"), U("colorspace"), U("transfer_characteristic"), U("components")]);
-        flow_versions.insert(nmos::is04_versions::v1_3, vec![U("event_type")]);
-        flow_versions
-    });
-    map.insert(nmos::types::sender, {
-        let mut sender_versions = HashMap::new();
-        sender_versions.insert(nmos::is04_versions::v1_0, vec![U("id"), U("version"), U("label"), U("description"), U("flow_id"), U("transport"), U("tags"), U("device_id"), U("manifest_href")]);
-        sender_versions.insert(nmos::is04_versions::v1_2, vec![U("caps"), U("interface_bindings"), U("subscription")]);
-        sender_versions
-    });
-    map.insert(nmos::types::receiver, {
-        let mut receiver_versions = HashMap::new();
-        receiver_versions.insert(nmos
+json::JsonValue::Object(result)
