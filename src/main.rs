@@ -1,7 +1,8 @@
 // an implementation of IS-04 for NMOS in rust
 //
 
-pub mod capabilities-nmos;
+pub mod capabilities
+pub mod api_downgrade;-nmos;
 
 use hyper::rt::{Future, Stream};
 use hyper::Client;
