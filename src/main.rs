@@ -3,6 +3,7 @@
 
 pub mod admin_ui;
 pub mod api_downgrade;
+pub mod api_utils;
 pub mod capabilities;
 
 use hyper::rt::{Future, Stream};
@@ -25,12 +26,7 @@ fn main() {
         .body(node)
         .and_then(|res| {
             println!("Response: {}", res.status());
-            println!(
-                "Headers: {:#?}
-
-",
-                res.headers()
-            );
+            println!("Headers: {:#?}", res.headers());
             res.into_body()
                 .for_each(|&chunk| io::stdout().write_all(&chunk).map_err(From::from))
         })

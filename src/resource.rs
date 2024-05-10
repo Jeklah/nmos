@@ -58,3 +58,41 @@ mod nmos {
         }
     }
 }
+
+// Unit tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_make_resource_core() {
+        let id = "resource_id";
+        let label = "resource_label";
+        let description = "resource_description";
+        let tags = HashMap::new();
+        let result = nmos::details::make_resource_core(id, label, description, tags);
+        let expected = json!({
+            "id": "resource_id",
+            "version": {"major": 1, "minor": 2},
+            "label": "resource_label",
+            "description": "resource_description",
+            "tags": {}
+        });
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_make_resource_core_from_settings() {
+        let id = "resource_id";
+        let settings = nmos::Settings::new("label_from_settings", "description_from_settings");
+        let result = nmos::details::make_resource_core_from_settings(id, &settings);
+        let expected = json!({
+            "id": "resource_id",
+            "version": {"major": 1, "minor": 2},
+            "label": "label_from_settings",
+            "description": "description_from_settings",
+            "tags": {}
+        });
+        assert_eq!(result, expected);
+    }
+}
