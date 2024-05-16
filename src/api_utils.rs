@@ -1,4 +1,8 @@
 use http::{header, StatusCode};
+use hyper;
+use pplx;
+use serde_json;
+use slog;
 use std::collections::{HashMap, HashSet};
 use url::form_urlencoded;
 
@@ -332,4 +336,350 @@ mod experimental {
         }
         None
     }
+}
+
+mod details {
+    use http::{header, Response, StatusCode};
+    use slog::Logger;
+    use std::fmt::Write as _;
+
+    use super::add_cors_preflight_headers;
+
+    // Make user error information (to be used with status_codes::NotFound)
+    fn make_eased_resource_error() -> String {
+        "resource has recently expired or been deleted".to_string()
+    }
+
+    // Make handler to check support API version, and set error response otherwise
+    fn make_api_version_handler(
+        versions: std::collections::HashSet<api_version>,
+        gate_: &slog::Logger,
+    ) -> impl Fn(
+        http::Request<hyper::Body>,
+        http::Response<hyper::Body>,
+        String,
+        route_parameters,
+    ) -> pplx::task<bool> {
+        move |mut req, mut res, _, _| {
+            let gate = api_gate(&gate_, &req, &parameters);
+            let received_time = req
+                .headers()
+                .get("Received-Time")
+                .map(|val| val.to_str().unwrap_or_default());
+            let processing_dur = received_time.map_or(0.0, |time| {
+                let received_time = chrono::DateTime::parse_from_rfc2822(time).unwrap_or_default();
+                (chrono::Utc::now() - received_time).num_milliseconds() as f64
+            });
+
+            // Add Server-Timing response header
+            if let Some(received_time) = received_time {
+                req.headers_mut().remove("Received-Time");
+                res.headers_mut()
+                    .insert(header::SERVER_TIMING, received_time);
+                res.headers_mut().insert(header::TIMING_ALLOW_ORIGIN, "*");
+            }
+
+            if let Some(hsts) = hsts {
+                res.headers_mut()
+                    .insert(header::STRICT_TRANSPORT_SECURITY, hsts);
+            }
+
+            // If it was a HEAD request, restore that and discard any response body.
+            if let Some(method) = req.headers().get("Actual-Method") {
+                if method == "HEAD" {
+                    req.set_method(http::Method::HEAD);
+                    req.headers_mut().remove("Actual-Method");
+                    if res.body().is_some() {
+                        res.set_body(hyper::Body::empty());
+                    }
+                }
+            }
+
+            if res.status().is_success() {
+                res.set_status_code(StatusCode::NOT_FOUND);
+            } // ??
+
+            if res.status() == StatusCode::METHOD_NOT_ALLOWED {
+                res.headers_mut()
+                    .insert(header::ALLOW, methods::OPTIONS.to_string().parse().unwrap());
+                if req.method() == http::Method::OPTIONS {
+                    res.set_status_code(StatusCode::OK);
+                    if req.headers().contains_key("Access-Control-Request-Method") {
+                        add_cors_preflight_headers(&mut req, &mut res);
+                    }
+                }
+            }
+
+            if res.status() == StatusCode::NOT_FOUND {
+                slog::error!(gate, "Route not found");
+            }
+
+            if res.status().is_server_error() && res.body().is_none() {
+                res.set_body(make_error_response_body(res.status()));
+            }
+
+            // Indicate that the Accept request header may affect the response
+            res.headers_mut().insert(header::VARY, header::ACCEPT);
+
+            // Experimental extension to support human-readable HTML rendering of NMOS responses
+            if let Some(accept) = req.headers().get(header::ACCEPT) {
+                if accept.to_str().unwrap_or_default().contains("text/html") {
+                    if let Some(body) = res.body_mut() {
+                        if let Ok(body) = body.bytes() {
+                            if let Ok(body) =
+                                serde_json::from_slice::<Vec<serde_json::Value>>(&body)
+                            {
+                                res.set_body(hyper::Body::from(
+                                    experimental::make_html_response_body(&res, &gate),
+                                ));
+                                res.headers_mut()
+                                    .insert(header::CONTENT_TYPE, "text/html".parse().unwrap());
+                            }
+                        }
+                    }
+                }
+            }
+
+            slog::info!(gate, "Sending response after {}ms", processing_dur);
+
+            // The task returned by reply() silently 'observes' any exception thrown from the
+            // underlying server reply() itself can throw http::exception if a response has already
+            // been sent, but that would indicate a programming error.
+            req.reply(res);
+
+            pplx::task::ok(false) // Don't continue matching routes
+        }
+    }
+
+    // Make handler to set appropriate response headers, and error response body if indicated
+    fn add_api_finally_handler(
+        api: &mut web::http::experimental::listener::api_router,
+        gate: &slog::Logger,
+    ) {
+        add_api_finally_handler(api, None, Gate);
+    }
+}
+
+use slog::{error, info, Logger};
+use std::convert::Infallible;
+use std::error::Error;
+use std::fmt::Write as _;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use warp::{http, Filter, Rejection, Reply};
+
+// Define a custom error type for API rejection
+#[derive(Debug)]
+struct ApiError {
+    status_code: http::StatusCode,
+    message: String,
+}
+
+impl warp::reject::Reject for ApiError {}
+
+impl ApiError {
+    fn new(status_code: http::StatusCode, message: impl Into<String>) -> Self {
+        ApiError {
+            status_code,
+            message: message.into(),
+        }
+    }
+}
+
+// JWT validation to confirm authentication credentials and an access token that allows access to
+// the protected resource
+fn make_validate_authorization_handler(
+    model: Arc<Mutex<BaseModel>>,
+    authorization_state: Arc<Mutex<AuthorizationState>>,
+    scope: Scope,
+    access_token_validation: ValidateAuthorizationTokenHandler,
+    gate: Logger,
+) -> impl Filter<Extract = impl warp::Reply, Error = Rejection> + Clone {
+    warp::any().map(move || {
+        let model = Arc::clone(&model);
+        let authorization_state = Arc::clone(&authorization_state);
+        let gate = gate.clone();
+        move || {
+            let model = Arc::clone(&model);
+            let authorization_state = Arc::clone(&authorization_state);
+            let gate = gate.clone();
+            warp::any().map(move || {
+                let model = Arc::clone(&model);
+                let authorization_state = Arc::clone(&authorization_state);
+                let gate = gate.clone();
+                move |req: http::Request<Vec<u8>>| {
+                    let gate = gate.clone();
+                    async move {
+                        // Get the token issuer
+                        let token_issuer = {
+                            let model = model.lock().unwrap();
+                            get_host_name(&model.settings)
+                        };
+
+                        // Validate authorzation
+                        let result = validate_authorization(
+                            &req,
+                            &scope,
+                            &token_issuer,
+                            &access_token_validation,
+                            &gate,
+                        );
+
+                        match result {
+                            Ok(()) => Ok(warp::reply()),
+                            Err(error) => {
+                                // Set error response
+                                let realm = match req.headers().get("Host") {
+                                    Some(host) => host.to_str().unwrap_or_default(),
+                                    None => get_host(&model.lock().unwrap().settings),
+                                };
+                                let retry_after = match &authorization_state.lock().unwrap().settings {
+                                    Some(settings) => settings.service_unavailable_retry_after,
+                                    None => 0,
+                                };
+                                let error_message = error.to_string();
+                                let reply = warp::reply::with_status(error_message, error.status_code).into_response();
+                                let reply = reply.with_header(
+                                    "WWW-Authenticate",
+                                    format!("Bearer realm=\"{}\", error=\"{}\", error_description=\"{}\"",
+                                            realm, error_message, error_description
+                                    ),
+                                );
+                                Ok(reply)
+                            }
+                        }
+                    }
+                }
+            })
+        }
+    })
+    .and_then(|handler| warp::path::end().and(handler()))
+}
+
+// Set appropriate response headers and error response body if indicated
+fn make_api_finally_handler(
+    hsts: Option<hsts>,
+    gate: Logger,
+) -> impl Filter<Extract = impl warp::Reply, Error = Rejection> + Clone {
+    warp::any()
+        .map(move || {
+            let gate = gate.clone();
+            move |req: http::Request<Vec<u8>>| {
+                let gate = gate.clone();
+                async move {
+                    let processing_dur = match req.headers().get("Received-Time") {
+                        Some(received_time) => {
+                            let received_time = String::from_utf8_lossy(received_time.as_bytes());
+                            let received_time =
+                                chrono::DateTime::parse_from_rfc2822(&received_time.to_string())
+                                    .unwrap_or_default();
+                            (chrono::Utc::now() - received_time).num_milliseconds() as f64
+                        }
+                        None => 0.0,
+                    };
+
+                    // Add Server-timing response header
+                    let mut response = warp::reply();
+                    let received_time = match req.headers().get("Received-Time") {
+                        Some(received_time) => {
+                            let received_time =
+                                String::from_utf8_lossy(received_time.as_bytes()).to_string();
+                            response
+                                .headers_mut()
+                                .insert("Server-Timing", received_time);
+                            response
+                                .headers_mut()
+                                .insert("Timing-Allow-Origin", "*".parse().unwrap());
+                            Some(received_time)
+                        }
+                        None => None,
+                    };
+
+                    if let Some(hsts) = &hsts {
+                        response
+                            .headers_mut()
+                            .insert("Strict-Transport-Security", hsts.clone());
+                    }
+
+                    // Set Status code
+                    if response.status() == http::StatusCode::OK {
+                        *response.status_mut() = http::StatusCode::NOT_FOUND;
+                    }
+
+                    // Handle OPTIONS method
+                    if req.method() == http::Method::OPTIONS {
+                        if let Some(method) = req.headers().get("Access-Control-Request-Method") {
+                            response.headers_mut().insert(
+                                "Allow",
+                                method.to_str().unwrap_or_default().parse().unwrap(),
+                            );
+                            *response.status_mut() = http::StatusCode::OK;
+                        }
+                    }
+
+                    // Handle HEAD method
+                    if let Some(method) = req.headers().get("Actual-Method") {
+                        if method == "HEAD" {
+                            *req.method_mut() = http::Method::HEAD;
+                            req.headers_mut().remove("Actual-Method");
+                            *response.body_mut() = Vec::new();
+                        }
+                    }
+
+                    info!(gate, "Sending response after {}ms", processing_dur);
+
+                    Ok(response)
+                }
+            }
+        })
+        .recover(|_: Rejection| async { Ok(warp::reply()) })
+}
+
+// Error handling middleware to catch and handle API errors
+async fn handle_rejection(err: Rejection) -> Result<impl Reply, Infallible> {
+    if let Some(err) = err.find::<ApiError>() {
+        let code = err.status_code;
+        let message = err.message;
+        let json = warp::reply::json(&json!({ "error": message }));
+        Ok(warp::reply::with_status(json, code))
+    } else {
+        Ok(warp::reply::with_status(
+            warp::reply::json(&json!({ "error": "Internal Server Error" })),
+            http::StatusCode::INTERNAL_SERVER_ERROR,
+        ))
+    }
+}
+
+fn to_pem(public_key: &str) -> String {
+    let mut pem = String::new();
+    for key in public_key {
+        writeln!(pem, "------BEGIN-----").unwrap();
+        pem.push_str_(&base64::encode(&key));
+        writeln!(pem, "------END-----").unwrap();
+    }
+    pem
+}
+
+// Start the API listener with the specified configurations
+async fn start_api_listener(
+    secure: bool,
+    host_address: String,
+    port: u16,
+    api: warp::Filter<impl warp::Reply>,
+    config: HttpListenerConfig,
+    gate: Logger,
+) -> Result<(), Box<dyn Error>> {
+    let addr = format!("{}:{}", host_address, port);
+    let listener = warp::serve(api)
+        .tls()
+        .cert_path(config.cert_path)
+        .key_path(config.key_path);
+    if let Some(hsts) = hsts {
+        listener
+            .h2()
+            .prepend(warp::reply::header("Strict-Transport-Security", hsts));
+    }
+
+    listener.run(addr.parse()?).await;
+    Ok(())
 }
